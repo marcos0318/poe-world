@@ -9,14 +9,44 @@ from .transit_func_utils import experiences2text, experiences2text_with_wrong_ou
 from .evaluator import evaluate_transit_code
 from ..env_info import DocString, TransitCodeExample
 
+def _is_text_based_state(experiences):
+    """Detect if experiences use TextState (text-based) vs object-centric states."""
+    if not experiences:
+        return False
+    state = experiences[0].input_state
+    if hasattr(state, 'observation') and hasattr(state, 'available_actions'):
+        return True
+    if hasattr(state, 'get_objs_by_obj_type'):
+        return False
+    if isinstance(state, str):
+        return True
+    return False
+
 def refine_transit(
     code, crt_experiences, wrong_experiences, llm, verbose=True,
 ):
     verbose_flag = verbose
 
+    # Detect if we're using text-based states
+    is_text_based = _is_text_based_state(crt_experiences + wrong_experiences)
+
     crt_text_experiences = experiences2text(crt_experiences)
     _crt_experiences = copy.copy(crt_experiences)
     wrong_text_experiences = experiences2text_with_wrong_outputs(wrong_experiences, code)
+    
+    # Choose system message based on state type
+    if is_text_based:
+        system_message = TEXT_FIRST_SYSTEM_MESSAGE
+        # Emphasize text-based nature
+        crt_text_experiences = f"""**CRITICAL: TEXT-BASED environment. Parse state.observation, don't use object methods!**
+
+{crt_text_experiences}"""
+        wrong_text_experiences = f"""**CRITICAL: TEXT-BASED environment. The code failed because it likely tried to use object methods like get_objs_by_obj_type(). State has .observation (str) and .available_actions (tuple).**
+
+{wrong_text_experiences}"""
+    else:
+        system_message = FIRST_SYSTEM_MESSAGE
+
     while count_tokens_for_openai(FIRST_MESSAGE.format(
         code = code,
         crt_experiences=crt_text_experiences,
@@ -28,7 +58,7 @@ def refine_transit(
         crt_text_experiences = experiences2text(_crt_experiences,)
 
     chat_history = [
-        {'role': 'system', 'content': FIRST_SYSTEM_MESSAGE.format()},
+        {'role': 'system', 'content': system_message},
         {'role': 'user', 'content': FIRST_MESSAGE.format(
             code = code,
             crt_experiences=crt_text_experiences,
@@ -93,7 +123,35 @@ def refine_transit(
     }
 
 FIRST_SYSTEM_MESSAGE = '''
-You are a robot exploring in an object-centric environment. Your goal is to model the logic of the world in python. You have tried it before and came up with one partially correct solution. However, it is not perfect. They can model the logic for some experiences but failed for others. You need to improve your code to model the logic of the world for all the experiences. The new code needs to be directly runnable on the (state, action) pair and return the next state in python as provided in the experiences.
+You are a robot exploring in an environment. Your goal is to model the logic of the world in python. You have tried it before and came up with one partially correct solution. However, it is not perfect. They can model the logic for some experiences but failed for others. You need to improve your code to model the logic of the world for all the experiences. The new code needs to be directly runnable on the (state, action) pair and return the next state in python as provided in the experiences.
+
+**CRITICAL - State Format:**
+- If states contain text descriptions ("Your current position is...", "The goal is at..."): PARSE the text and GENERATE text output
+- If states contain physical objects with positions: Use ObjList methods like get_objs_by_obj_type()
+
+DO NOT assume object-centric state when the text shows descriptions!
+'''
+
+TEXT_FIRST_SYSTEM_MESSAGE = '''
+You are refining a world model for a TEXT-BASED environment.
+
+**CRITICAL: THIS IS A TEXT-BASED ENVIRONMENT**
+
+The state is a TextState object with:
+- `state.observation` (str): Text containing all state information
+- `state.available_actions` (tuple): Available actions as strings
+
+**YOU MUST:**
+1. Parse `state.observation` using string operations or regex
+2. Generate new text for the output state's observation
+3. Return a TextState with updated observation
+
+**DO NOT:**
+- Use `state.get_objs_by_obj_type()` - DOES NOT EXIST for TextState!
+- Access `.objs`, `.velocity_x`, etc. - these don't exist!
+- Modify object attributes directly
+
+The previous code likely failed because it assumed object-centric state. Fix it to properly parse and generate text.
 '''
 
 
