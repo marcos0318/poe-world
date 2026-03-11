@@ -141,7 +141,24 @@ class _LLM:
             idx=nth,
         )
         with Session(self.engine) as session, session.begin():
-            session.add(item)
+            # Use merge instead of add to handle duplicate keys gracefully
+            # This prevents UNIQUE constraint violations when multiple
+            # processes/samples generate the same prompt/hash_idx
+            try:
+                session.merge(item)
+            except Exception as e:
+                # If merge fails, try to check if the item already exists
+                existing = session.execute(
+                    select(self.cache_schema).where(
+                        self.cache_schema.prompt == prompt_in_str,
+                        self.cache_schema.model_args == model_args_in_str,
+                        self.cache_schema.idx == nth
+                    )
+                ).fetchone()
+                if existing is None:
+                    # Item doesn't exist but merge failed, re-raise
+                    raise e
+                # Item exists, skip adding
         return completion
 
     def _action(self, prompt, model_args=None):
