@@ -1,6 +1,7 @@
 # coding=utf-8
 
 import os
+import json
 import copy
 from dataclasses import dataclass
 
@@ -30,8 +31,8 @@ ENGINES = {
 }
 
 class LLM:
-    def __init__(self, default_args={'model': 'gpt-4o', 'temperature': 1.0,}, seed=None,):
-        self.llm = _LLM(default_args=copy.deepcopy(default_args), seed=seed,)
+    def __init__(self, default_args={'model': 'gpt-4o', 'temperature': 1.0,}, seed=None, api_key=None, base_url=None):
+        self.llm = _LLM(default_args=copy.deepcopy(default_args), seed=seed, api_key=api_key, base_url=base_url)
         self.tracker = LLMUsageTracker()
     def __call__(self, prompt, model_args=None):
         completion = self.llm(prompt, model_args)
@@ -45,14 +46,50 @@ class LLM:
     def default_args(self):
         return self.llm.default_args
 
+def _load_deepinfra_key_from_secrets():
+    """Load DeepInfra API key from secrets.json file."""
+    try:
+        secrets_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'openai-hf-interface', 'secrets.json'
+        )
+        if os.path.exists(secrets_path):
+            with open(secrets_path, 'r') as f:
+                data = json.load(f)
+                return data.get('deepinfra_api_key')
+    except Exception:
+        pass
+    return None
+
+
 class _LLM:
-    def __init__(self, default_args={'model': 'gpt-4o', 'temperature': 1.0,}, seed=0,):
+    def __init__(self, default_args={'model': 'gpt-4o', 'temperature': 1.0,}, seed=0, api_key=None, base_url=None):
         assert seed in ENGINES, f"seed: {seed} not in {ENGINES.keys()}"
         self.engine = ENGINES[seed]
         self.default_args = default_args
+
+        # Determine API key and base URL
+        # Priority: 1) passed parameters, 2) DEEPINFRA env var, 3) secrets.json, 4) KEVIN_OPEN_ROUTER_KEY env var
+        if api_key is None:
+            # Check for DeepInfra API key in env var
+            api_key = os.environ.get('DEEPINFRA_API_KEY')
+            if api_key is None:
+                # Try to read from secrets.json
+                api_key = _load_deepinfra_key_from_secrets()
+            if api_key is None:
+                # Fall back to OpenRouter
+                api_key = os.environ.get('KEVIN_OPEN_ROUTER_KEY')
+
+        if base_url is None:
+            # Determine base URL based on which API key source we have
+            if os.environ.get('DEEPINFRA_API_KEY') or _load_deepinfra_key_from_secrets():
+                base_url = 'https://api.deepinfra.com/v1/openai'
+            else:
+                base_url = 'https://openrouter.ai/api/v1'
+
         self.client = OpenAI(
-            base_url='https://openrouter.ai/api/v1',
-            api_key=os.environ['KEVIN_OPEN_ROUTER_KEY'],
+            base_url=base_url,
+            api_key=api_key,
         )
         self.local_tracker = LLMUsageTracker()
         self.nth_dict = {}

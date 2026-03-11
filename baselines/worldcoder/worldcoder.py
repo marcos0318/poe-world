@@ -523,7 +523,7 @@ class WorldCoder(WorldModelLearner):
         llm = LLM(seed=self.config.seed)
         
         spending = 0.1 if fast else 0.5
-        res = synthesize_transit(self.c, init_transit_code=self.world_model_code, llm=llm, max_budget=min(spending, self.update_world_model_budget), with_total_cost=True, np_rng=self.config.seed)
+        res = synthesize_transit(self.c, init_transit_code=self.world_model_code, llm=llm, max_budget=min(spending, self.update_world_model_budget), with_total_cost=True, np_rng=self.config.seed, max_synthesis_rounds=1)
         self.world_model_code = res['code']
         
         self.update_world_model_budget -= res['final_total_cost']

@@ -182,6 +182,7 @@ def synthesize_transit(
     bandits_C=25.0,
     np_rng=None,
     with_total_cost=False,
+    max_synthesis_rounds=None,
 ):
     if np_rng is None:
         np_rng = np.random.default_rng(seed=0)
@@ -227,6 +228,9 @@ def synthesize_transit(
     step = 0
     best_success_ratio = -1
     while total_cost < max_budget:
+        if max_synthesis_rounds is not None and step >= max_synthesis_rounds:
+            log.info(f'Reached max_synthesis_rounds={max_synthesis_rounds}, stopping')
+            break
         log.info('='*10 + f'step {step}' + '='*10)
         
         if step > 0 and step % 100 == 0:

@@ -39,6 +39,7 @@ def evaluate_transit_code(code, experiences):
         results = {
             'success_flag': False,
             'success_ratio': 0,
+            'observation_match_ratio': 0,
             'compilation_error': compilation_error,
             'crt_experiences': dict(),
             'wrong_experiences': experiences,
@@ -47,6 +48,7 @@ def evaluate_transit_code(code, experiences):
                 'success_flag': False,
                 'pred_new_state': None,
                 'pred_state_success_flag': False,
+                'observation_match_flag': False,
                 'experience': exp,
                 'compilation_error': compilation_error,
             } for exp in experiences],
@@ -59,6 +61,7 @@ def evaluate_transit_code(code, experiences):
     success_ratio = sum([result['success_flag'] for result in result_list]) / len(result_list)
     pred_state_success_flag = all([result['pred_state_success_flag'] for result in result_list])
     pred_state_success_ratio = sum([result['pred_state_success_flag'] for result in result_list]) / len(result_list)
+    observation_match_ratio = sum([result.get('observation_match_flag', result['success_flag']) for result in result_list]) / len(result_list)
     crt_experiences = [x for x, result in zip(experiences, result_list) if result['success_flag']]
     wrong_experiences = [x for x, result in zip(experiences, result_list) if not result['success_flag']]
     results = {
@@ -66,6 +69,7 @@ def evaluate_transit_code(code, experiences):
         'success_ratio': success_ratio,
         'pred_state_success_flag': pred_state_success_flag,
         'pred_state_success_ratio': pred_state_success_ratio,
+        'observation_match_ratio': observation_match_ratio,
         'compilation_error': None,
         'crt_experiences': crt_experiences,
         'wrong_experiences': wrong_experiences,
@@ -82,6 +86,7 @@ def eval_transit_per_experience(transit_func, experience, exec_globals):
         return {
             'success_flag': False,
             'pred_state_success_flag': False,
+            'observation_match_flag': False,
             'pred_new_state': None,
             'experience': experience,
             'compilation_error': _exec_globals,
@@ -95,6 +100,7 @@ def eval_transit_per_experience(transit_func, experience, exec_globals):
         return {
             'success_flag': False,
             'pred_state_success_flag': False,
+            'observation_match_flag': False,
             'pred_new_state': None,
             'experience': experience,
             'compilation_error': _exec_globals,
@@ -123,6 +129,7 @@ def eval_transit_per_experience(transit_func, experience, exec_globals):
         return {
             'success_flag': False,
             'pred_state_success_flag': False,
+            'observation_match_flag': False,
             'pred_new_state': None,
             'experience': experience,
             'compilation_error': exec_globals,
@@ -135,6 +142,7 @@ def eval_transit_per_experience(transit_func, experience, exec_globals):
         return {
             'success_flag': False,
             'pred_state_success_flag': False,
+            'observation_match_flag': False,
             'pred_new_state': None,
             'experience': experience,
             'compilation_error': f'The predicted new state is the wrong type: {type(pred_new_state)} instead of {type(new_state)}',
@@ -146,12 +154,24 @@ def eval_transit_per_experience(transit_func, experience, exec_globals):
     assert not isinstance(_exec_globals, str), f'Failed to run the post_step of the new state: {_exec_globals}'
 
     # Check the success flag
-    pred_state_success_flag = are_two_obj_lists_equal(pred_new_state, new_state)
+    # Handle TextState-like objects (observation, available_actions) which don't support len()
+    if (hasattr(pred_new_state, 'observation') and hasattr(pred_new_state, 'available_actions') and
+            hasattr(new_state, 'observation') and hasattr(new_state, 'available_actions')):
+        pred_state_success_flag = (
+            pred_new_state.observation == new_state.observation and
+            pred_new_state.available_actions == new_state.available_actions
+        )
+        # Relaxed: observation exact match only (actions may differ)
+        observation_match_flag = (pred_new_state.observation == new_state.observation)
+    else:
+        pred_state_success_flag = are_two_obj_lists_equal(pred_new_state, new_state)
+        observation_match_flag = pred_state_success_flag  # no separate notion for non-TextState
     success_flag = pred_state_success_flag
     return {
         'success_flag': success_flag,
         'pred_new_state': pred_new_state,
         'pred_state_success_flag': pred_state_success_flag,
+        'observation_match_flag': observation_match_flag,
         'experience': experience,
         'compilation_error': None
     }
